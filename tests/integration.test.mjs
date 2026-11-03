@@ -5,29 +5,31 @@ import {initialize,PostgresStore} from '../server/store.mjs';
 import {configure,createApplication} from '../server/application.mjs';
 import {signSession,readSession} from '../server/auth.mjs';
 let pg,server,base,key,event,receipt,cookie;
+const notifications=[];
 const origin='http://127.0.0.1';
 async function api(path,body,staff='',session=''){
  const r=await fetch(base+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-Judge-Key':staff,...(session?{Cookie:session}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(10000)});
  const raw=await r.text();let data;try{data=JSON.parse(raw)}catch{data=raw}return {status:r.status,data,headers:r.headers};
 }
 before(async()=>{
- pg=new PGlite();await initialize(pg);configure({SESSION_SECRET:'fixture-session-secret-32-characters-long',ADMIN_USERNAME:'FixtureAdmin',ADMIN_PASSWORD:'fixture-admin-password',TEST_ADMIN_USERNAME:'FixtureTester',TEST_ADMIN_PASSWORD:'fixture-test-password',NODE_ENV:'test'},new PostgresStore(pg));
- const app=createApplication({databasePool:pg});server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));base=origin+':'+server.address().port;
+ pg=new PGlite();await initialize(pg);configure({SESSION_SECRET:'fixture-session-secret-32-characters-long',ADMIN_EMAIL:'organizer@example.test',ADMIN_USERNAME:'FixtureAdmin',ADMIN_PASSWORD:'fixture-admin-password',TEST_ADMIN_USERNAME:'FixtureTester',TEST_ADMIN_PASSWORD:'fixture-test-password',NODE_ENV:'test'},new PostgresStore(pg));
+ const app=createApplication({databasePool:pg,notifyLogin:async(settings,login)=>{notifications.push(login)}});server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));base=origin+':'+server.address().port;
 });
 after(async()=>{if(server)await new Promise(r=>server.close(r));if(pg)await pg.close()});
 test('health, organizer login, session, unauthorized access',async()=>{
  assert.equal((await api('/healthz')).status,200);
  assert.equal((await api('/api/data?mine=1')).status,401);
- assert.equal((await api('/api/login',{username:'FixtureAdmin',password:'wrong'})).status,401);
- const login=await api('/api/login',{username:'FixtureAdmin',password:'fixture-admin-password'});assert.equal(login.status,200);cookie=login.headers.get('set-cookie').split(';')[0];assert.match(login.headers.get('set-cookie'),/HttpOnly/);
+ assert.equal((await api('/api/login',{username:'FixtureAdmin',password:'wrong'})).status,401);assert.equal(notifications.length,0);
+ const login=await api('/api/login',{username:'FixtureAdmin',password:'fixture-admin-password'});assert.equal(login.status,200);assert.deepEqual(notifications.at(-1),{test:false,account:'FixtureAdmin',email:'organizer@example.test'});cookie=login.headers.get('set-cookie').split(';')[0];assert.match(login.headers.get('set-cookie'),/HttpOnly/);
  const create=await api('/api/data',{action:'create',name:'Fixture tournament',tables:50},'',cookie);assert.equal(create.status,200);key=create.data.key;event=create.data.id;
  assert.equal((await api('/api/data?event='+event+'&staff=1')).status,401);
  assert.equal((await api('/api/data?mine=1',null,'',cookie)).data.length,1);
  const token=signSession('fixture','x'.repeat(32),100);assert.equal(readSession(token,'x'.repeat(32),101).userId,'fixture');assert.equal(readSession(token+'x','x'.repeat(32),101),null);assert.equal(readSession(token,'x'.repeat(32),100+9*3600000),null);
 });
 test('practice login scope and repeat login keep calls',async()=>{
- assert.equal((await api('/api/test-login',{username:'FixtureTester',password:'wrong'})).status,401);
+ const prior=notifications.length;assert.equal((await api('/api/test-login',{username:'FixtureTester',password:'wrong'})).status,401);assert.equal(notifications.length,prior);
  const login=await api('/api/test-login',{username:'FixtureTester',password:'fixture-test-password'});assert.equal(login.status,200);
+ assert.equal(notifications.at(-1).test,true);assert.equal(notifications.at(-1).account,'FixtureTester');
  const practice=await api('/api/data?event='+login.data.id);assert.equal(practice.data.practice,true);assert.equal(practice.data.tables,50);
  assert.equal((await api('/api/data',{action:'rotate',event:login.data.id},login.data.key)).status,403);
  const repeat=await api('/api/test-login',{username:'FixtureTester',password:'fixture-test-password'});assert.equal(repeat.data.key,login.data.key);

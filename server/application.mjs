@@ -4,6 +4,7 @@ import QRCode from 'qrcode';
 import {createHmac} from 'node:crypto';
 import {env,requestContext} from './runtime.mjs';
 import {equalSecret,signSession,readSession,cookieValue} from './auth.mjs';
+import {sendLoginNotification,loginEmailConfigured} from './login-email.mjs';
 import {GET as dataGET,POST as dataPOST} from './routes/data.mjs';
 import {POST as screenPOST} from './routes/screen.mjs';
 import {POST as testPOST} from './routes/test-login.mjs';
@@ -12,7 +13,11 @@ export function configure(settings,database){
  if(!env.SESSION_SECRET||env.SESSION_SECRET.length<32)throw Error('SESSION_SECRET must contain at least 32 characters.');
  if(env.TEST_ADMIN_PASSWORD){env.TEST_ADMIN_USERNAME=env.TEST_ADMIN_USERNAME||'TestAdmin';env.TEST_STAFF_KEY=env.TEST_STAFF_KEY||createHmac('sha256',env.SESSION_SECRET).update('practice:'+env.TEST_ADMIN_PASSWORD).digest('hex')}
 }
-export function createApplication({databasePool,staticDirectory=path.resolve('dist/web')}={}){
+export function createApplication({databasePool,staticDirectory=path.resolve('dist/web'),notifyLogin=sendLoginNotification}={}){
+ async function notify(test){
+  const account=test?env.TEST_ADMIN_USERNAME:env.ADMIN_USERNAME;
+  try{await notifyLogin(env,{test,account,email:test?undefined:(env.ADMIN_EMAIL||account)})}catch{console.error('Login notification failed.');}
+ }
  const app=express();app.disable('x-powered-by');app.set('trust proxy',1);
  app.use((req,res,next)=>{res.set('X-Content-Type-Options','nosniff');res.set('Referrer-Policy','no-referrer');next()});
  app.use('/api',(req,res,next)=>{
@@ -25,7 +30,7 @@ export function createApplication({databasePool,staticDirectory=path.resolve('di
   next();
  });
  app.use(express.json({limit:'6kb'}));
- app.get('/healthz',async(req,res)=>{try{if(databasePool)await databasePool.query('SELECT 1');res.json({status:'ok'})}catch{res.status(503).json({status:'database unavailable'})}});
+ app.get('/healthz',async(req,res)=>{try{if(databasePool)await databasePool.query('SELECT 1');res.json({status:'ok',loginEmailNotifications:loginEmailConfigured(env)?'configured':'not_configured'})}catch{res.status(503).json({status:'database unavailable'})}});
  app.post('/api/login',async(req,res)=>{
   if(!env.ADMIN_USERNAME||!env.ADMIN_PASSWORD)return res.status(503).json({error:'Organizer sign-in has not been configured. Use the practice login for testing.'});
   const stamp=Date.now(),key=createHmac('sha256',env.SESSION_SECRET).update('organizer:'+req.ip+':'+Math.floor(stamp/900000)).digest('hex');
@@ -35,6 +40,7 @@ export function createApplication({databasePool,staticDirectory=path.resolve('di
    if(attempt.count>20)return res.status(429).json({error:'Too many attempts. Try again in 15 minutes.'});
    if(!equalSecret(req.body.username||'',env.ADMIN_USERNAME)||!equalSecret(req.body.password||'',env.ADMIN_PASSWORD))return res.status(401).json({error:'Incorrect username or password.'});
    const cookie=signSession('organizer:'+env.ADMIN_USERNAME,env.SESSION_SECRET);
+   await notify(false);
    res.setHeader('Set-Cookie',`judging_session=${cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800${env.NODE_ENV==='production'?'; Secure':''}`);res.json({ok:true});
   }catch{res.status(500).json({error:'Could not sign in. Please retry.'})}
  });
@@ -48,6 +54,7 @@ export function createApplication({databasePool,staticDirectory=path.resolve('di
    const request=new Request(url,{method:req.method,headers,...(req.method==='GET'?{}:{body:JSON.stringify(req.body)})});
    const user=readSession(cookieValue(req.headers.cookie,'judging_session'),env.SESSION_SECRET);
    const result=await requestContext.run({user},()=>handler(request));
+   if(handler===testPOST&&result.ok)await notify(true);
    result.headers.forEach((v,k)=>res.set(k,v));res.status(result.status).send(Buffer.from(await result.arrayBuffer()));
   }catch{res.status(500).json({error:'Unable to process request. Please retry.'})}
  }

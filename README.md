@@ -56,3 +56,11 @@ npm test
 Integration tests run against an embedded PostgreSQL engine (PGlite) using fixture-only credentials. They exercise the actual Express HTTP application, SQL adapter, organizer sessions, practice authentication, authorization, duplicate calls, single-claim behavior, request status, round clock concurrency, announcements, QR generation, persistence initialization, and malformed/cross-origin writes. The source builds successfully. Remote Render connectivity and deployment cannot be verified until the GitHub repository and a database connection are configured.
 
 For local interactive use, set the required environment variables in your shell or an untracked .env file. Node 22 can load it using `node --env-file=.env server/start.mjs` after a build. Use NODE_ENV=development locally so HTTP session cookies work.
+
+## Sign-in email notifications
+
+Successful practice and organizer sign-ins can send a plain-text email through Resend. Failed logins and ordinary dashboard views do not send email. Test notices explicitly identify the shared test account. Normal notices include `ADMIN_EMAIL`, or `ADMIN_USERNAME` when it is already an email address. A username-only account without `ADMIN_EMAIL` is reported honestly as having no configured sign-in email; no arbitrary email supplied by the client is trusted.
+
+Set `RESEND_API_KEY`, `LOGIN_NOTIFY_FROM` (an authorized Resend sender), and `LOGIN_NOTIFY_TO` in Render. Set `ADMIN_EMAIL` to the email belonging to the normal organizer account. Never commit these values. Resend sender/domain restrictions apply; production senders must be authorized with the provider.
+
+`/healthz` reports whether notification configuration is present; this does not prove delivery. Test both successful login paths and check the recipient inbox and Render logs after setup. Sending has a five-second timeout; an email-provider failure is logged without credentials and does not block a valid login. These immediate notifications are best effort, with no durable retry queue.
