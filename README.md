@@ -64,3 +64,9 @@ Successful practice and organizer sign-ins can send a plain-text email through R
 Set `RESEND_API_KEY`, `LOGIN_NOTIFY_FROM` (an authorized Resend sender), and `LOGIN_NOTIFY_TO` in Render. Set `ADMIN_EMAIL` to the email belonging to the normal organizer account. Never commit these values. Resend sender/domain restrictions apply; production senders must be authorized with the provider.
 
 `/healthz` reports whether notification configuration is present; this does not prove delivery. Test both successful login paths and check the recipient inbox and Render logs after setup. Sending has a five-second timeout; an email-provider failure is logged without credentials and does not block a valid login. These immediate notifications are best effort, with no durable retry queue.
+
+## Public organizer accounts
+
+Anyone can create an account at `/?view=signup` with an email address and a 12–128 character password. Registration signs them in; subsequent sign-ins use `/?view=login`. Passwords use salted scrypt hashes stored in the dedicated `judging_users` table. Registration and login have independent per-IP rate limits. Accounts have stable IDs and can list and manage only the events they own, while staff keys continue to grant judge access. Existing configured organizer credentials remain supported for existing events.
+
+Successful registration (which signs the user in) and subsequent sign-ins trigger the non-test usage notification to the configured owner recipient. Registered email addresses are not ownership-verified; notices state this explicitly. This feature does not send verification email to registrants, and does not include a password-reset flow. Do not treat a registered email address as verified identity.

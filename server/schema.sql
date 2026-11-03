@@ -12,3 +12,6 @@ CREATE TABLE IF NOT EXISTS judging_calls (
 CREATE UNIQUE INDEX IF NOT EXISTS judging_one_active ON judging_calls(event,table_no) WHERE status!='Resolved';
 CREATE INDEX IF NOT EXISTS judging_call_queue ON judging_calls(event,created);
 CREATE TABLE IF NOT EXISTS judging_login_attempts(bucket TEXT PRIMARY KEY,count INTEGER NOT NULL,expires BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS judging_users (
+ id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created BIGINT NOT NULL
+);

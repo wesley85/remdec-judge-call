@@ -1,9 +1,10 @@
 import express from 'express';
+import {registerAccount,authenticateOrganizer,currentAccount} from './accounts.mjs';
 import path from 'node:path';
 import QRCode from 'qrcode';
 import {createHmac} from 'node:crypto';
 import {env,requestContext} from './runtime.mjs';
-import {equalSecret,signSession,readSession,cookieValue} from './auth.mjs';
+import {signSession,readSession,cookieValue} from './auth.mjs';
 import {sendLoginNotification,loginEmailConfigured} from './login-email.mjs';
 import {GET as dataGET,POST as dataPOST} from './routes/data.mjs';
 import {POST as screenPOST} from './routes/screen.mjs';
@@ -14,9 +15,9 @@ export function configure(settings,database){
  if(env.TEST_ADMIN_PASSWORD){env.TEST_ADMIN_USERNAME=env.TEST_ADMIN_USERNAME||'TestAdmin';env.TEST_STAFF_KEY=env.TEST_STAFF_KEY||createHmac('sha256',env.SESSION_SECRET).update('practice:'+env.TEST_ADMIN_PASSWORD).digest('hex')}
 }
 export function createApplication({databasePool,staticDirectory=path.resolve('dist/web'),notifyLogin=sendLoginNotification}={}){
- async function notify(test){
+ async function notify(test,user){
   const account=test?env.TEST_ADMIN_USERNAME:env.ADMIN_USERNAME;
-  try{await notifyLogin(env,{test,account,email:test?undefined:(env.ADMIN_EMAIL||account)})}catch{console.error('Login notification failed.');}
+  try{await notifyLogin(env,{test,account,email:test?undefined:(user?.email||env.ADMIN_EMAIL||account),...(user?{account:user.account}:{}),...(user?.emailVerified===false?{emailVerified:false}:{})})}catch{console.error('Login notification failed.');}
  }
  const app=express();app.disable('x-powered-by');app.set('trust proxy',1);
  app.use((req,res,next)=>{res.set('X-Content-Type-Options','nosniff');res.set('Referrer-Policy','no-referrer');next()});
@@ -32,17 +33,34 @@ export function createApplication({databasePool,staticDirectory=path.resolve('di
  app.use(express.json({limit:'6kb'}));
  app.get('/healthz',async(req,res)=>{try{if(databasePool)await databasePool.query('SELECT 1');res.json({status:'ok',loginEmailNotifications:loginEmailConfigured(env)?'configured':'not_configured'})}catch{res.status(503).json({status:'database unavailable'})}});
  app.post('/api/login',async(req,res)=>{
-  if(!env.ADMIN_USERNAME||!env.ADMIN_PASSWORD)return res.status(503).json({error:'Organizer sign-in has not been configured. Use the practice login for testing.'});
   const stamp=Date.now(),key=createHmac('sha256',env.SESSION_SECRET).update('organizer:'+req.ip+':'+Math.floor(stamp/900000)).digest('hex');
   try{
    await env.DB.prepare('DELETE FROM login_attempts WHERE expires < ?').bind(stamp).run();
    const attempt=await env.DB.prepare('INSERT INTO login_attempts(bucket,count,expires) VALUES(?,1,?) ON CONFLICT(bucket) DO UPDATE SET count=judging_login_attempts.count+1 RETURNING count').bind(key,stamp+900000).first();
    if(attempt.count>20)return res.status(429).json({error:'Too many attempts. Try again in 15 minutes.'});
-   if(!equalSecret(req.body.username||'',env.ADMIN_USERNAME)||!equalSecret(req.body.password||'',env.ADMIN_PASSWORD))return res.status(401).json({error:'Incorrect username or password.'});
-   const cookie=signSession('organizer:'+env.ADMIN_USERNAME,env.SESSION_SECRET);
-   await notify(false);
+   const user=await authenticateOrganizer(env,req.body.username,req.body.password);
+   if(!user)return res.status(401).json({error:'Incorrect email or password.'});
+   const cookie=signSession(user.userId,env.SESSION_SECRET);
+   await notify(false,user);
    res.setHeader('Set-Cookie',`judging_session=${cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800${env.NODE_ENV==='production'?'; Secure':''}`);res.json({ok:true});
   }catch{res.status(500).json({error:'Could not sign in. Please retry.'})}
+ });
+ app.post('/api/register',async(req,res)=>{
+  try{
+   const stamp=Date.now(),bucket=createHmac('sha256',env.SESSION_SECRET).update('register:'+req.ip+':'+Math.floor(stamp/900000)).digest('hex');
+   await env.DB.prepare('DELETE FROM login_attempts WHERE expires < ?').bind(stamp).run();
+   const attempt=await env.DB.prepare('INSERT INTO login_attempts(bucket,count,expires) VALUES(?,1,?) ON CONFLICT(bucket) DO UPDATE SET count=judging_login_attempts.count+1 RETURNING count').bind(bucket,stamp+900000).first();
+   if(attempt.count>10)return res.status(429).json({error:'Too many registration attempts. Try again in 15 minutes.'});
+   const result=await registerAccount(env,req.body.email,req.body.password);
+   if(!result.user)return res.status(result.status).json({error:result.error});
+   const cookie=signSession(result.user.userId,env.SESSION_SECRET);
+   await notify(false,result.user);
+   res.setHeader('Set-Cookie',`judging_session=${cookie}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800${env.NODE_ENV==='production'?'; Secure':''}`);
+   res.status(201).json({ok:true});
+  }catch{res.status(500).json({error:'Could not create your account. Please retry.'})}
+ });
+ app.get('/api/account',async(req,res)=>{
+  try{const user=await currentAccount(env,readSession(cookieValue(req.headers.cookie,'judging_session'),env.SESSION_SECRET));res.json(user?{email:user.email}:null)}catch{res.status(500).json({error:'Unable to load your account.'})}
  });
  app.post('/api/logout',(req,res)=>{res.setHeader('Set-Cookie','judging_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');res.json({ok:true})});
  async function dispatch(req,res,handler){

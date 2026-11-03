@@ -4,13 +4,14 @@ const emailPattern=/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 export function loginEmailConfigured(settings){
  return Boolean(settings.RESEND_API_KEY&&settings.LOGIN_NOTIFY_FROM&&emailPattern.test(settings.LOGIN_NOTIFY_TO||''));
 }
-export function loginMessage({test,account,email,at=new Date()}){
+export function loginMessage({test,account,email,emailVerified,at=new Date()}){
  const kind=test?'TEST account':'non-test account';
  const time=new Intl.DateTimeFormat('en-US',{timeZone:'America/Denver',dateStyle:'full',timeStyle:'long'}).format(at);
  return {
   subject:`RemDec Judge Call: ${kind} used`,
   text:[`A successful sign-in occurred on RemDec Judge Call.`,`Account type: ${kind}`,`Account: ${account}`,
    ...(test?['This was the shared practice/test account.']: [`Sign-in email: ${emailPattern.test(email||'')?email:'Not configured for this username-based account.'}`]),
+   ...(emailVerified===false?['Email ownership has not been verified.']:[]),
    `Time: ${time}`].join('\n'),
  };
 }
