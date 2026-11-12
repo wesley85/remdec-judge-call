@@ -14,7 +14,7 @@ export async function GET(req:Request){try{
  if(q.get('receipt'))return json(await db.prepare('SELECT status FROM calls WHERE id=?').bind(q.get('receipt')).first()||{status:'No request'});
  const event=await db.prepare('SELECT * FROM events WHERE id=?').bind(q.get('event')).first<any>();if(!event)return json({error:'Event not found'},404);
  if(q.get('display'))return json({event:{id:event.id,name:event.name,tables:event.tables,open:event.open},timer:{round:event.round,remaining:event.timer_remaining,ends:event.timer_ends,state:event.timer_state,updated:event.timer_updated},announcement:event.announcement,bcpUrl:event.bcp_url,serverNow:Date.now(),calls:(await db.prepare("SELECT table_no,status,created FROM calls WHERE event=? AND status!='Resolved' ORDER BY created").bind(event.id).all()).results});
- if(q.get('staff')){if(await hash(req.headers.get('X-Judge-Key')||'')!==event.key_hash)return json({error:'Staff key is incorrect'},401);return json({event:{id:event.id,name:event.name,tables:event.tables,open:event.open,practice:event.owner==='test-practice-only'},calls:(await db.prepare("SELECT id,event,table_no,kind,status,judge,created,updated,(claim_hash=?) AS claimed_by_me FROM calls WHERE event=? ORDER BY (status='Resolved') ASC, created DESC LIMIT 1000").bind(await claimIdentity(req),event.id).all()).results})}
+ if(q.get('staff')){if(await hash(req.headers.get('X-Judge-Key')||'')!==event.key_hash)return json({error:'Staff key is incorrect'},401);const organizer=await getChatGPTUser();return json({canManage:organizer?.userId===event.owner,event:{id:event.id,name:event.name,tables:event.tables,open:event.open,wait_highlight_minutes:event.wait_highlight_minutes,practice:event.owner==='test-practice-only'},calls:(await db.prepare("SELECT id,event,table_no,kind,status,judge,created,updated,responded_at,(claim_hash=?) AS claimed_by_me FROM calls WHERE event=? ORDER BY (status='Resolved') ASC, created DESC LIMIT 1000").bind(await claimIdentity(req),event.id).all()).results})}
  return json({id:event.id,name:event.name,tables:event.tables,open:event.open,practice:event.owner==='test-practice-only'});
  }catch{return json({error:'Could not load data. Please retry.'},500)}}
 export async function POST(req:Request){try{
@@ -27,6 +27,20 @@ export async function POST(req:Request){try{
  const id=crypto.randomUUID(),key=token();await db.prepare('INSERT INTO events(id,owner,name,tables,key_hash,open,created) VALUES(?,?,?,?,?,1,?)').bind(id,user.userId,name,tables,await hash(key),now).run();return json({id,key});}
  const event=await db.prepare('SELECT * FROM events WHERE id=?').bind(d.event).first<any>();if(!event)return json({error:'Event not found'},404);
  if(d.action==='rotate'){const user=await getChatGPTUser();if(!user||user.userId!==event.owner)return json({error:'Sign in as the event organizer to reset the key.'},403);const key=token();await db.prepare('UPDATE events SET key_hash=? WHERE id=?').bind(await hash(key),event.id).run();return json({key})}
+ if(d.action==='requeue'||d.action==='wait_threshold'){
+  const organizer=await getChatGPTUser();
+  if(organizer?.userId!==event.owner)return json({error:'Only the event organizer can do this.'},403);
+  if(d.action==='wait_threshold'){
+   const minutes=d.minutes;
+   if(!Number.isInteger(minutes)||minutes<1||minutes>120)return json({error:'Enter a wait threshold from 1 to 120 minutes.'},400);
+   await db.prepare('UPDATE events SET wait_highlight_minutes=? WHERE id=?').bind(minutes,event.id).run();
+   return json({ok:true});
+  }
+  const result=await db.prepare("UPDATE calls SET status='Waiting',judge='',claim_hash=NULL,updated=? WHERE id=? AND event=? AND status='On my way' AND updated=?")
+   .bind(now,d.id,event.id,d.updated).run();
+  if(!result.meta.changes)return json({error:'This call changed. Check the queue and try again.'},409);
+  return json({ok:true});
+ }
  if(d.action==='request'){if(!event.open)return json({error:'This event is closed.'},409);const table=Number(d.table);if(!Number.isInteger(table)||table<1||table>event.tables||!['Rules question','Scoring help','Private assistance'].includes(d.kind))return json({error:'Invalid table or request type'},400);
  const old=await db.prepare("SELECT id FROM calls WHERE event=? AND table_no=? AND status!='Resolved'").bind(event.id,table).first<any>();if(old)return json({id:old.id});
  const prev=await db.prepare('SELECT MAX(created) AS stamp FROM calls WHERE event=? AND table_no=?').bind(event.id,table).first<any>();if(prev.stamp&&now-prev.stamp<20000)return json({error:'Please wait a few seconds before calling again.'},429);
@@ -42,8 +56,8 @@ export async function POST(req:Request){try{
   if(d.status==='On my way'){
    const name=String(d.judge||'').trim().slice(0,40);
    if(!name)return json({error:'Enter your judge name first.'},400);
-   result=await db.prepare("UPDATE calls SET status='On my way',judge=?,claim_hash=?,updated=? WHERE id=? AND event=? AND status='Waiting'")
-    .bind(name,identity,now,d.id,event.id).run();
+   result=await db.prepare("UPDATE calls SET status='On my way',judge=?,claim_hash=?,updated=?,responded_at=COALESCE(responded_at,?) WHERE id=? AND event=? AND status='Waiting'")
+    .bind(name,identity,now,now,d.id,event.id).run();
   }else{
    result=await db.prepare("UPDATE calls SET status=?,judge=CASE WHEN ?='Waiting' THEN '' ELSE judge END,claim_hash=NULL,updated=? WHERE id=? AND event=? AND status='On my way' AND claim_hash=?")
     .bind(d.status,d.status,now,d.id,event.id,identity).run();

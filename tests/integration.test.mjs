@@ -51,7 +51,17 @@ test('judge calls, deduplication and single-claim protection',async()=>{
  for(const status of ['On my way','Resolved','Waiting']){
   assert.equal((await api('/api/data',{...update,status},key,'',judgeB)).status,409);
  }
- assert.equal((await api('/api/data',{...update,status:'Waiting'},key)).status,200);
+ const claimed=(await api(queue,null,key,cookie)).data;
+ assert.equal(claimed.canManage,true);
+ const requeue={action:'requeue',event,id:receipt,updated:claimed.calls[0].updated};
+ assert.equal((await api('/api/data',requeue,key)).status,403);
+ assert.equal((await api('/api/data',{...requeue,updated:requeue.updated-1},key,cookie)).status,409);
+ assert.equal((await api('/api/data',requeue,key,cookie)).status,200);
+ assert.equal((await api('/api/data?receipt='+receipt)).data.status,'Waiting');
+ assert.equal((await api('/api/data',{action:'wait_threshold',event,minutes:2},key)).status,403);
+ assert.equal((await api('/api/data',{action:'wait_threshold',event,minutes:0},key,cookie)).status,400);
+ assert.equal((await api('/api/data',{action:'wait_threshold',event,minutes:2},key,cookie)).status,200);
+ assert.equal((await api(queue,null,key)).data.event.wait_highlight_minutes,2);
  assert.equal((await api('/api/data',update,key,'',judgeB)).status,200);
  assert.equal((await api('/api/data',{...update,status:'Resolved'},key)).status,409);
 
@@ -59,6 +69,10 @@ test('judge calls, deduplication and single-claim protection',async()=>{
  const screen=await api('/api/data?event='+event+'&display=1');assert.equal(screen.status,200);assert.deepEqual(Object.keys(screen.data.calls[0]).sort(),['created','status','table_no']);assert.equal(screen.data.event.key_hash,undefined);
  assert.equal((await api('/api/data',{...update,status:'Resolved'},key,'',judgeB)).status,200);
  assert.equal((await api('/api/data?receipt='+receipt)).data.status,'Resolved');
+ const history=(await api(queue,null,key)).data.calls[0];
+ assert.equal(history.judge,'Fixture Judge');
+ assert.equal(history.responded_at,claimed.calls[0].responded_at);
+ assert.ok(history.updated>=history.responded_at&&history.responded_at>=history.created);
  assert.equal((await api('/api/data',{...req,table:51})).status,400);
 });
 test('shared timer, announcement, optimistic concurrency, QR and persistence',async()=>{

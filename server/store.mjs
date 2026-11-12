@@ -14,7 +14,7 @@ export class PostgresStore {
   }}};
  }
 }
-function normalize(row){if(!row)return row;const out={...row};for(const key of ['created','updated','timer_remaining','timer_ends','timer_updated','stamp','serverNow','expires'])if(out[key]!==null&&out[key]!==undefined)out[key]=Number(out[key]);return out}
+function normalize(row){if(!row)return row;const out={...row};for(const key of ['created','updated','responded_at','timer_remaining','timer_ends','timer_updated','stamp','serverNow','expires'])if(out[key]!==null&&out[key]!==undefined)out[key]=Number(out[key]);return out}
 export async function initialize(database){
  const sql=await fs.readFile(new URL('./schema.sql',import.meta.url),'utf8');
  // The schema only creates judging_* tables. It never edits scheduler tables.
