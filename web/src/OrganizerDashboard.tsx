@@ -118,16 +118,21 @@ function TournamentDetails({id,onLogoChange}:{id:string;onLogoChange:(logo:Heade
    <fieldset disabled={busy} className="branding-fields">
     <label>Button color <input type="color" value={colors.buttonColor} onChange={e=>setColors({...colors,buttonColor:e.target.value})}/></label>
     <label>Background color <input type="color" value={colors.backgroundColor} onChange={e=>setColors({...colors,backgroundColor:e.target.value})}/></label>
-    <label>Call alert sound <select value={sound} onChange={e=>setSound(alertSoundOrDefault(e.target.value))}>
+    <div className="branding-sound">
+     <label htmlFor="branding-alert-sound">Call alert sound</label>
+     <div className="branding-sound-controls">
+      <select id="branding-alert-sound" value={sound} onChange={e=>setSound(alertSoundOrDefault(e.target.value))}>
      {Object.entries(alertSounds).map(([value,preset])=><option value={value} key={value}>{preset.label}</option>)}
-    </select></label>
-    <button type="button" className="secondary" style={{alignSelf:'flex-end',minHeight:36,padding:'7px 11px',fontSize:'0.875rem'}} onClick={async()=>{
+    </select>
+    <button type="button" className="secondary branding-sound-preview" aria-label="Preview sound" onClick={async()=>{
      try{
       previewAudio.current??=new AudioContext();
       await previewAudio.current.resume();
       playAlert(previewAudio.current,sound);
      }catch{setNotice('Sound unavailable in this browser.')}
-    }}>Preview sound</button>
+    }}>Preview</button>
+     </div>
+    </div>
     <label>Event logo <input key={revision} type="file" accept="image/png,image/jpeg,image/webp" onChange={async e=>{
      const file=e.target.files?.[0];
      if(!file)return;
