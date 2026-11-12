@@ -7,8 +7,9 @@ import {signSession,readSession} from '../server/auth.mjs';
 let pg,server,base,key,event,receipt,cookie;
 const notifications=[];
 const origin='http://127.0.0.1';
-async function api(path,body,staff='',session=''){
- const r=await fetch(base+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-Judge-Key':staff,...(session?{Cookie:session}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(10000)});
+const judgeA='11111111-1111-4111-8111-111111111111',judgeB='22222222-2222-4222-8222-222222222222';
+async function api(path,body,staff='',session='',judgeSession=judgeA){
+ const r=await fetch(base+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-Judge-Key':staff,'X-Judge-Session':judgeSession,...(session?{Cookie:session}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(10000)});
  const raw=await r.text();let data;try{data=JSON.parse(raw)}catch{data=raw}return {status:r.status,data,headers:r.headers};
 }
 before(async()=>{
@@ -42,9 +43,21 @@ test('judge calls, deduplication and single-claim protection',async()=>{
  assert.equal((await api('/api/data',update)).status,401);
  assert.equal((await api('/api/data',update,key)).status,200);
  assert.equal((await api('/api/data',update,key)).status,409);
+ const queue='/api/data?event='+event+'&staff=1';
+ assert.equal((await api(queue,null,key)).data.calls[0].claimed_by_me,true);
+ const other=(await api(queue,null,key,'',judgeB)).data.calls[0];
+ assert.equal(other.claimed_by_me,false);
+ assert.equal(other.claim_hash,undefined);
+ for(const status of ['On my way','Resolved','Waiting']){
+  assert.equal((await api('/api/data',{...update,status},key,'',judgeB)).status,409);
+ }
+ assert.equal((await api('/api/data',{...update,status:'Waiting'},key)).status,200);
+ assert.equal((await api('/api/data',update,key,'',judgeB)).status,200);
+ assert.equal((await api('/api/data',{...update,status:'Resolved'},key)).status,409);
+
  assert.equal((await api('/api/data?receipt='+receipt)).data.status,'On my way');
  const screen=await api('/api/data?event='+event+'&display=1');assert.equal(screen.status,200);assert.deepEqual(Object.keys(screen.data.calls[0]).sort(),['created','status','table_no']);assert.equal(screen.data.event.key_hash,undefined);
- assert.equal((await api('/api/data',{...update,status:'Resolved'},key)).status,200);
+ assert.equal((await api('/api/data',{...update,status:'Resolved'},key,'',judgeB)).status,200);
  assert.equal((await api('/api/data?receipt='+receipt)).data.status,'Resolved');
  assert.equal((await api('/api/data',{...req,table:51})).status,400);
 });

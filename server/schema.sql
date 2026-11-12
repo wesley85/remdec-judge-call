@@ -15,3 +15,6 @@ CREATE TABLE IF NOT EXISTS judging_login_attempts(bucket TEXT PRIMARY KEY,count 
 CREATE TABLE IF NOT EXISTS judging_users (
  id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created BIGINT NOT NULL
 );
+
+ALTER TABLE judging_calls ADD COLUMN IF NOT EXISTS claim_hash TEXT;
+UPDATE judging_calls SET status='Waiting',judge='' WHERE status='On my way' AND claim_hash IS NULL;
