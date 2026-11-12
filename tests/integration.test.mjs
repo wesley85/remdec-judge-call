@@ -6,6 +6,7 @@ import {configure,createApplication} from '../server/application.mjs';
 import {signSession,readSession} from '../server/auth.mjs';
 let pg,server,base,key,event,receipt,cookie;
 const notifications=[];
+const supportMessages=[];
 const origin='http://127.0.0.1';
 const judgeA='11111111-1111-4111-8111-111111111111',judgeB='22222222-2222-4222-8222-222222222222';
 async function api(path,body,staff='',session='',judgeSession=judgeA){
@@ -14,7 +15,7 @@ async function api(path,body,staff='',session='',judgeSession=judgeA){
 }
 before(async()=>{
  pg=new PGlite();await initialize(pg);configure({SESSION_SECRET:'fixture-session-secret-32-characters-long',ADMIN_EMAIL:'organizer@example.test',ADMIN_USERNAME:'FixtureAdmin',ADMIN_PASSWORD:'fixture-admin-password',TEST_ADMIN_USERNAME:'FixtureTester',TEST_ADMIN_PASSWORD:'fixture-test-password',NODE_ENV:'test'},new PostgresStore(pg));
- const app=createApplication({databasePool:pg,notifyLogin:async(settings,login)=>{notifications.push(login)}});server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));base=origin+':'+server.address().port;
+ const app=createApplication({databasePool:pg,notifyLogin:async(settings,login)=>{notifications.push(login)},sendSupport:async(settings,message)=>{supportMessages.push(message);return true}});server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));base=origin+':'+server.address().port;
 });
 after(async()=>{if(server)await new Promise(r=>server.close(r));if(pg)await pg.close()});
 test('health, organizer login, session, unauthorized access',async()=>{
@@ -139,4 +140,20 @@ test('ending a tournament revokes player and judge access while preserving organ
 test('malformed JSON and cross-origin writes are rejected',async()=>{
  const r=await fetch(base+'/api/data',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://untrusted.example'},body:'{}'});assert.equal(r.status,403);
  const malformed=await fetch(base+'/api/data',{method:'POST',headers:{'Content-Type':'application/json'},body:'{broken'});assert.equal(malformed.status,400);
+});
+
+test('support tickets require contact details and route screenshots to RemDec',async()=>{
+ const ticket={name:'Fixture Player',email:'player@example.test',issue:'The queue did not refresh.'};
+ assert.equal((await api('/api/support',{...ticket,name:''})).status,400);
+ assert.equal((await api('/api/support',{...ticket,email:'invalid'})).status,400);
+ assert.equal((await api('/api/support',{...ticket,issue:'  '})).status,400);
+ assert.equal((await api('/api/support',{...ticket,screenshot:'data:image/png;base64,AAAA'})).status,400);
+ assert.equal((await api('/api/support',ticket)).status,200);
+ assert.deepEqual(supportMessages[0].to,['remdeccreations@gmail.com']);
+ assert.equal(supportMessages[0].reply_to,ticket.email);
+ assert.equal(supportMessages[0].attachments,undefined);
+ const screenshot='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aQ3sAAAAASUVORK5CYII=';
+ assert.equal((await api('/api/support',{...ticket,phone:'555-0100',screenshot:'data:image/png;base64,'+screenshot})).status,200);
+ assert.deepEqual(supportMessages[1].attachments,[{filename:'screenshot.png',content:screenshot}]);
+ assert.match(supportMessages[1].text,/555-0100/);
 });

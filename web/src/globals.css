@@ -48,3 +48,5 @@
 @media print{.event-branding{background:white;min-height:0}.sign .print-event-logo{max-height:52px}}
 
 .header-event-logo{max-width:min(190px,35vw);max-height:54px;width:auto;height:auto}
+
+.support-description{display:block;width:100%;margin-top:8px;padding:13px;font:inherit;color:white;background:#101c14;border:1px solid #4f6956;border-radius:6px;resize:vertical}

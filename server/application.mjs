@@ -1,3 +1,4 @@
+import {supportMessage,sendSupportTicket} from './support-email.mjs';
 import express from 'express';
 import {registerAccount,authenticateOrganizer,currentAccount} from './accounts.mjs';
 import path from 'node:path';
@@ -14,7 +15,7 @@ export function configure(settings,database){
  if(!env.SESSION_SECRET||env.SESSION_SECRET.length<32)throw Error('SESSION_SECRET must contain at least 32 characters.');
  if(env.TEST_ADMIN_PASSWORD){env.TEST_ADMIN_USERNAME=env.TEST_ADMIN_USERNAME||'TestAdmin';env.TEST_STAFF_KEY=env.TEST_STAFF_KEY||createHmac('sha256',env.SESSION_SECRET).update('practice:'+env.TEST_ADMIN_PASSWORD).digest('hex')}
 }
-export function createApplication({databasePool,staticDirectory=path.resolve('dist/web'),notifyLogin=sendLoginNotification}={}){
+export function createApplication({databasePool,staticDirectory=path.resolve('dist/web'),notifyLogin=sendLoginNotification,sendSupport=sendSupportTicket}={}){
  async function notify(test,user){
   const account=test?env.TEST_ADMIN_USERNAME:env.ADMIN_USERNAME;
   try{await notifyLogin(env,{test,account,email:test?undefined:(user?.email||env.ADMIN_EMAIL||account),...(user?{account:user.account}:{}),...(user?.emailVerified===false?{emailVerified:false}:{})})}catch{console.error('Login notification failed.');}
@@ -31,6 +32,19 @@ export function createApplication({databasePool,staticDirectory=path.resolve('di
   next();
  });
  app.use('/api/branding',express.json({limit:'140kb'}));
+ app.post('/api/support',express.json({limit:'3mb'}),async(req,res)=>{
+  let message;
+  try{message=supportMessage(req.body)}catch(error){return res.status(400).json({error:error.message})}
+  try{
+   const now=Date.now();
+   const bucket=createHmac('sha256',env.SESSION_SECRET).update('support:'+req.ip+':'+Math.floor(now/900000)).digest('hex');
+   await env.DB.prepare('DELETE FROM login_attempts WHERE expires < ?').bind(now).run();
+   const attempt=await env.DB.prepare('INSERT INTO login_attempts(bucket,count,expires) VALUES(?,1,?) ON CONFLICT(bucket) DO UPDATE SET count=judging_login_attempts.count+1 RETURNING count').bind(bucket,now+900000).first();
+   if(attempt.count>5)return res.status(429).json({error:'Too many tickets. Please try again in 15 minutes.'});
+   if(await sendSupport(env,message))return res.json({ok:true});
+  }catch{console.error('Support ticket delivery failed.')}
+  return res.status(503).json({error:'The ticket could not be emailed right now.'});
+ });
  app.use(express.json({limit:'6kb'}));
  app.get('/healthz',async(req,res)=>{try{if(databasePool)await databasePool.query('SELECT 1');res.json({status:'ok',loginEmailNotifications:loginEmailConfigured(env)?'configured':'not_configured'})}catch{res.status(503).json({status:'database unavailable'})}});
  app.post('/api/login',async(req,res)=>{
