@@ -22,3 +22,6 @@ UPDATE judging_calls SET status='Waiting',judge='' WHERE status='On my way' AND 
 ALTER TABLE judging_events ADD COLUMN IF NOT EXISTS wait_highlight_minutes INTEGER NOT NULL DEFAULT 5;
 ALTER TABLE judging_calls ADD COLUMN IF NOT EXISTS responded_at BIGINT;
 UPDATE judging_calls SET responded_at=updated WHERE status='On my way' AND responded_at IS NULL;
+
+ALTER TABLE judging_events ADD COLUMN IF NOT EXISTS branding JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE judging_events ADD COLUMN IF NOT EXISTS logo_data TEXT;

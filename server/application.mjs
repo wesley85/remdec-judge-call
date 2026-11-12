@@ -30,6 +30,7 @@ export function createApplication({databasePool,staticDirectory=path.resolve('di
   }
   next();
  });
+ app.use('/api/branding',express.json({limit:'140kb'}));
  app.use(express.json({limit:'6kb'}));
  app.get('/healthz',async(req,res)=>{try{if(databasePool)await databasePool.query('SELECT 1');res.json({status:'ok',loginEmailNotifications:loginEmailConfigured(env)?'configured':'not_configured'})}catch{res.status(503).json({status:'database unavailable'})}});
  app.post('/api/login',async(req,res)=>{
@@ -77,6 +78,7 @@ export function createApplication({databasePool,staticDirectory=path.resolve('di
   }catch{res.status(500).json({error:'Unable to process request. Please retry.'})}
  }
  app.get('/api/data',(req,res)=>dispatch(req,res,dataGET));app.post('/api/data',(req,res)=>dispatch(req,res,dataPOST));
+ app.post('/api/branding',(req,res)=>dispatch(req,res,dataPOST));
  app.post('/api/screen',(req,res)=>dispatch(req,res,screenPOST));app.post('/api/test-login',(req,res)=>dispatch(req,res,testPOST));
  app.get('/api/qr',async(req,res)=>{const id=String(req.query.event||''),table=Number(req.query.table);if(!/^[a-f0-9-]{36}$/.test(id)||!Number.isInteger(table)||table<1||table>500)return res.status(400).send('Invalid QR request');try{const origin=env.APP_ORIGIN||`${req.protocol}://${req.get('host')}`;const link=origin+'/?event='+encodeURIComponent(id)+'&table='+table;res.type('svg').set('Cache-Control','public,max-age=3600').send(await QRCode.toString(link,{type:'svg',margin:4,width:240,errorCorrectionLevel:'M'}))}catch{res.status(500).send('Unable to generate QR')}});
  app.use('/api',(req,res)=>res.status(404).json({error:'Not found'}));

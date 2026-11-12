@@ -75,6 +75,28 @@ test('judge calls, deduplication and single-claim protection',async()=>{
  assert.ok(history.updated>=history.responded_at&&history.responded_at>=history.created);
  assert.equal((await api('/api/data',{...req,table:51})).status,400);
 });
+test('organizer dashboard and print logo are scoped to the event',async()=>{
+ const path='/api/data?manage='+event;
+ assert.equal((await api(path,null,key)).status,403);
+ const owned=await api(path,null,'',cookie);
+ assert.equal(owned.status,200);
+ assert.ok(owned.data.calls.some(call=>call.id===receipt&&call.status==='Resolved'));
+ assert.equal(owned.data.event.key_hash,undefined);
+ const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aQ3sAAAAASUVORK5CYII=';
+ const colors={event,buttonColor:'#123456',backgroundColor:'#fafafa'};
+ assert.equal((await api('/api/branding',colors,key)).status,403);
+ assert.equal((await api('/api/branding',{...colors,buttonColor:'red'},'',cookie)).status,400);
+ assert.equal((await api('/api/branding',{...colors,logo:'data:image/svg+xml;base64,AAAA'},'',cookie)).status,400);
+ assert.equal((await api('/api/branding',{...colors,logo:'data:image/png;base64,'+png},'',cookie)).status,200);
+ assert.deepEqual((await api('/api/data?event='+event)).data.branding,{buttonColor:'#123456',backgroundColor:'#fafafa',hasLogo:true});
+ const logo=await fetch(base+'/api/data?logo='+event);
+ assert.equal(logo.headers.get('content-type'),'image/png');
+ assert.equal(Buffer.from(await logo.arrayBuffer()).toString('base64'),png);
+ assert.equal((await api('/api/branding',colors,'',cookie)).status,200);
+ assert.equal((await api('/api/data?event='+event)).data.branding.hasLogo,true);
+ assert.equal((await api('/api/branding',{...colors,logo:null},'',cookie)).status,200);
+ assert.equal((await fetch(base+'/api/data?logo='+event)).status,404);
+});
 test('shared timer, announcement, optimistic concurrency, QR and persistence',async()=>{
  let display=(await api('/api/data?event='+event+'&display=1')).data;
  const timer={event,operation:'set_running',seconds:600,round:2,version:display.timer.updated};
