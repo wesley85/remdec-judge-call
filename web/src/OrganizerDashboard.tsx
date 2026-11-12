@@ -65,6 +65,8 @@ function TournamentDetails({id,onLogoChange}:{id:string;onLogoChange:(logo:Heade
  useEffect(()=>()=>{void previewAudio.current?.close().catch(()=>{})},[]);
  const [logo,setLogo]=useState<string|null|undefined>();
  const [revision,setRevision]=useState(0);
+ const [waitMinutes,setWaitMinutes]=useState<string|null>(null);
+ const [waitNotice,setWaitNotice]=useState('');
  const [page,setPage]=useState(0);
  const [busy,setBusy]=useState(false);
  const [notice,setNotice]=useState('');
@@ -95,6 +97,19 @@ function TournamentDetails({id,onLogoChange}:{id:string;onLogoChange:(logo:Heade
   }catch(error){setNotice((error as Error).message)}
   finally{setBusy(false)}
  }
+ async function saveWaitThreshold(event:FormEvent){
+  event.preventDefault();
+  const minutes=Number(waitMinutes);
+  setBusy(true);
+  setWaitNotice('');
+  try{
+   await request('/api/data',{action:'wait_threshold',event:id,minutes});
+   setData(previous=>previous&&({...previous,event:{...previous.event,wait_highlight_minutes:minutes}}));
+   setWaitMinutes(null);
+   setWaitNotice('Wait threshold saved.');
+  }catch(error){setWaitNotice((error as Error).message)}
+  finally{setBusy(false)}
+ }
  if(!data)return <p role="status">{notice||'Loading tournament…'}</p>;
  const {event,calls}=data;
  const logoPreview=logo===undefined?(event.branding.hasLogo?logoUrl(id)+'&v='+revision:''):logo;
@@ -103,7 +118,7 @@ function TournamentDetails({id,onLogoChange}:{id:string;onLogoChange:(logo:Heade
   <section className="panel">
    <h2>{event.name}</h2>
    <p>{event.tables} tables · {event.open?'Open':'Closed'} · Created {new Date(event.created).toLocaleDateString()}</p>
-   <p>Wait alert after {event.wait_highlight_minutes} minutes.</p>
+
    <div className="organizer-stats">
     <span><strong>{calls.length}</strong> Total calls</span>
     {['Waiting','On my way','Resolved'].map(status=><span key={status}><strong>{calls.filter(call=>call.status===status).length}</strong> {status}</span>)}
@@ -113,6 +128,20 @@ function TournamentDetails({id,onLogoChange}:{id:string;onLogoChange:(logo:Heade
     <a className="button secondary" href={eventLink(id,'signs')}>Print table QR signs</a>
    </div>
   </section>
+  <form className="panel" onSubmit={saveWaitThreshold}>
+   <h2>Call queue settings</h2>
+   <div className="branding-fields">
+    <label>Highlight waiting calls after (minutes)
+     <input type="number" min={1} max={120} required disabled={busy}
+      value={waitMinutes??event.wait_highlight_minutes}
+      onChange={e=>setWaitMinutes(e.target.value)}/>
+    </label>
+   </div>
+   <div className="actions">
+    <button className="secondary" disabled={busy||waitMinutes===null||waitMinutes===''||Number(waitMinutes)===event.wait_highlight_minutes}>Save wait threshold</button>
+   </div>
+   {waitNotice&&<p role="status">{waitNotice}</p>}
+  </form>
   <form className="panel" onSubmit={save}>
    <h2>Tournament branding</h2>
    <fieldset disabled={busy} className="branding-fields">
