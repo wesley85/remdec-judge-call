@@ -121,7 +121,7 @@ function TournamentDetails({id,onLogoChange}:{id:string;onLogoChange:(logo:Heade
     <label>Call alert sound <select value={sound} onChange={e=>setSound(alertSoundOrDefault(e.target.value))}>
      {Object.entries(alertSounds).map(([value,preset])=><option value={value} key={value}>{preset.label}</option>)}
     </select></label>
-    <button type="button" className="secondary" onClick={async()=>{
+    <button type="button" className="secondary" style={{alignSelf:'flex-end',minHeight:36,padding:'7px 11px',fontSize:'0.875rem'}} onClick={async()=>{
      try{
       previewAudio.current??=new AudioContext();
       await previewAudio.current.resume();
