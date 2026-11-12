@@ -19,7 +19,11 @@ function validLogo(value:unknown){
 export async function GET(req:Request){try{
  const db=env.DB!;const q=new URL(req.url).searchParams;
  if(q.get('mine')){const user=await getChatGPTUser();if(!user)return json({error:'Sign in to manage your events.'},401);return json((await db.prepare('SELECT id,name,tables,open FROM events WHERE owner=? ORDER BY created DESC').bind(user.userId).all()).results)}
- if(q.get('receipt'))return json(await db.prepare('SELECT status FROM calls WHERE id=?').bind(q.get('receipt')).first()||{status:'No request'});
+ if(q.get('receipt')){
+  const receipt=await db.prepare('SELECT c.status,e.ended_at FROM calls c JOIN events e ON e.id=c.event WHERE c.id=?').bind(q.get('receipt')).first<any>();
+  if(receipt?.ended_at)return json({error:'This tournament has ended.'},410);
+  return json({status:receipt?.status||'No request'});
+ }
  const event=await db.prepare('SELECT * FROM events WHERE id=?').bind(q.get('manage')||q.get('logo')||q.get('event')).first<any>();if(!event)return json({error:'Event not found'},404);
  if(q.get('logo')){
   if(!event.logo_data)return json({error:'Logo not found'},404);
@@ -29,8 +33,9 @@ export async function GET(req:Request){try{
   const owner=await getChatGPTUser();
   if(owner?.userId!==event.owner)return json({error:'Sign in as the event organizer.'},403);
   const calls=await db.prepare('SELECT id,table_no,kind,status,judge,created,responded_at,updated FROM calls WHERE event=? ORDER BY created DESC').bind(event.id).all();
-  return json({event:{id:event.id,name:event.name,tables:event.tables,open:event.open,created:event.created,wait_highlight_minutes:event.wait_highlight_minutes,branding:brandingView(event)},calls:calls.results});
+  return json({event:{id:event.id,name:event.name,tables:event.tables,open:event.open,created:event.created,ended:Boolean(event.ended_at),wait_highlight_minutes:event.wait_highlight_minutes,branding:brandingView(event)},calls:calls.results});
  }
+ if(event.ended_at)return json({error:'This tournament has ended.'},410);
  if(q.get('display'))return json({event:{id:event.id,name:event.name,tables:event.tables,open:event.open},timer:{round:event.round,remaining:event.timer_remaining,ends:event.timer_ends,state:event.timer_state,updated:event.timer_updated},announcement:event.announcement,bcpUrl:event.bcp_url,serverNow:Date.now(),calls:(await db.prepare("SELECT table_no,status,created FROM calls WHERE event=? AND status!='Resolved' ORDER BY created").bind(event.id).all()).results});
  if(q.get('staff')){if(await hash(req.headers.get('X-Judge-Key')||'')!==event.key_hash)return json({error:'Staff key is incorrect'},401);const organizer=await getChatGPTUser();return json({canManage:organizer?.userId===event.owner,event:{id:event.id,name:event.name,tables:event.tables,open:event.open,wait_highlight_minutes:event.wait_highlight_minutes,alertSound:event.branding?.alertSound,practice:event.owner==='test-practice-only'},calls:(await db.prepare("SELECT id,event,table_no,kind,status,judge,created,updated,responded_at,(claim_hash=?) AS claimed_by_me FROM calls WHERE event=? ORDER BY (status='Resolved') ASC, created DESC LIMIT 1000").bind(await claimIdentity(req),event.id).all()).results})}
  return json({id:event.id,name:event.name,tables:event.tables,open:event.open,practice:event.owner==='test-practice-only',branding:brandingView(event)});
@@ -44,6 +49,13 @@ export async function POST(req:Request){try{
  const count=await db.prepare('SELECT COUNT(*) AS n FROM events WHERE owner=?').bind(user.userId).first<any>();if(count.n>=50)return json({error:'Event limit reached.'},400);
  const id=crypto.randomUUID(),key=token();await db.prepare('INSERT INTO events(id,owner,name,tables,key_hash,open,created) VALUES(?,?,?,?,?,1,?)').bind(id,user.userId,name,tables,await hash(key),now).run();return json({id,key});}
  const event=await db.prepare('SELECT * FROM events WHERE id=?').bind(d.event).first<any>();if(!event)return json({error:'Event not found'},404);
+ if(!brandingRequest&&d.action==='end'){
+  const organizer=await getChatGPTUser();
+  if(organizer?.userId!==event.owner)return json({error:'Only the event organizer can end this tournament.'},403);
+  await db.prepare('UPDATE events SET open=0,ended_at=COALESCE(ended_at,?) WHERE id=?').bind(now,event.id).run();
+  return json({ok:true});
+ }
+ if(event.ended_at)return json({error:'This tournament has ended.'},410);
  if(brandingRequest){
   const owner=await getChatGPTUser();
   if(owner?.userId!==event.owner)return json({error:'Sign in as the event organizer.'},403);
@@ -73,9 +85,9 @@ export async function POST(req:Request){try{
  if(d.action==='request'){if(!event.open)return json({error:'This event is closed.'},409);const table=Number(d.table);if(!Number.isInteger(table)||table<1||table>event.tables||!['Rules question','Scoring help','Private assistance'].includes(d.kind))return json({error:'Invalid table or request type'},400);
  const old=await db.prepare("SELECT id FROM calls WHERE event=? AND table_no=? AND status!='Resolved'").bind(event.id,table).first<any>();if(old)return json({id:old.id});
  const prev=await db.prepare('SELECT MAX(created) AS stamp FROM calls WHERE event=? AND table_no=?').bind(event.id,table).first<any>();if(prev.stamp&&now-prev.stamp<20000)return json({error:'Please wait a few seconds before calling again.'},429);
- const id=token();await db.prepare("INSERT OR IGNORE INTO calls(id,event,table_no,kind,status,judge,created,updated) VALUES(?,?,?,?,'Waiting','',?,?)").bind(id,event.id,table,d.kind,now,now).run();const saved=await db.prepare("SELECT id FROM calls WHERE event=? AND table_no=? AND status!='Resolved'").bind(event.id,table).first<any>();return json({id:saved.id});}
+ const id=token();await db.prepare("INSERT OR IGNORE INTO calls(id,event,table_no,kind,status,judge,created,updated) SELECT ?,id,?,?,'Waiting','',?,? FROM events WHERE id=? AND ended_at IS NULL").bind(id,table,d.kind,now,now,event.id).run();const saved=await db.prepare("SELECT id FROM calls WHERE event=? AND table_no=? AND status!='Resolved'").bind(event.id,table).first<any>();return saved?json({id:saved.id}):json({error:'This tournament has ended.'},410);}
  if(await hash(req.headers.get('X-Judge-Key')||'')!==event.key_hash)return json({error:'Staff key is incorrect'},401);
- if(d.action==='toggle'){await db.prepare('UPDATE events SET open=1-open WHERE id=?').bind(event.id).run();return json({ok:true})}
+ if(d.action==='toggle'){await db.prepare('UPDATE events SET open=1-open WHERE id=? AND ended_at IS NULL').bind(event.id).run();return json({ok:true})}
  if(d.action==='update'){
   const identity=await claimIdentity(req);
   if(!identity)return json({error:'Refresh the judge dashboard before updating a call.'},400);
@@ -85,10 +97,10 @@ export async function POST(req:Request){try{
   if(d.status==='On my way'){
    const name=String(d.judge||'').trim().slice(0,40);
    if(!name)return json({error:'Enter your judge name first.'},400);
-   result=await db.prepare("UPDATE calls SET status='On my way',judge=?,claim_hash=?,updated=?,responded_at=COALESCE(responded_at,?) WHERE id=? AND event=? AND status='Waiting'")
+   result=await db.prepare("UPDATE calls SET status='On my way',judge=?,claim_hash=?,updated=?,responded_at=COALESCE(responded_at,?) WHERE id=? AND event=? AND status='Waiting' AND EXISTS (SELECT 1 FROM events WHERE id=calls.event AND ended_at IS NULL)")
     .bind(name,identity,now,now,d.id,event.id).run();
   }else{
-   result=await db.prepare("UPDATE calls SET status=?,judge=CASE WHEN ?='Waiting' THEN '' ELSE judge END,claim_hash=NULL,updated=? WHERE id=? AND event=? AND status='On my way' AND claim_hash=?")
+   result=await db.prepare("UPDATE calls SET status=?,judge=CASE WHEN ?='Waiting' THEN '' ELSE judge END,claim_hash=NULL,updated=? WHERE id=? AND event=? AND status='On my way' AND claim_hash=? AND EXISTS (SELECT 1 FROM events WHERE id=calls.event AND ended_at IS NULL)")
     .bind(d.status,d.status,now,d.id,event.id,identity).run();
   }
   if(!result.meta.changes)return json({error:'This call changed or is assigned to another judge.'},409);

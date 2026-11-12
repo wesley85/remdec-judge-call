@@ -7,6 +7,7 @@ export async function POST(req:Request){try{
  const origin=req.headers.get('Origin');if(origin&&origin!==new URL(req.url).origin)return json({error:'Origin rejected'},403);
  const raw=await req.text();if(raw.length>5000)return json({error:'Request too large'},413);const d=JSON.parse(raw),db=env.DB!;
  const e=await db.prepare('SELECT * FROM events WHERE id=?').bind(d.event).first<any>();if(!e)return json({error:'Event not found'},404);
+ if(e.ended_at)return json({error:'This tournament has ended.'},410);
  if(await hash(req.headers.get('X-Judge-Key')||'')!==e.key_hash)return json({error:'Staff key required'},401);
  if(d.operation==='message'){
  const announcement=String(d.announcement||'').slice(0,500),bcpUrl=String(d.bcpUrl||'').trim();

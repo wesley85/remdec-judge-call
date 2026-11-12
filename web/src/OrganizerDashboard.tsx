@@ -7,7 +7,7 @@ export type HeaderLogo={id:string;name:string;hasLogo:boolean;revision:number};
 export type Branding={buttonColor?:string; backgroundColor?:string; hasLogo?:boolean; alertSound?:AlertSound};
 type EventSummary={id:string;name:string;tables:number;open:number};
 type Call={id:string;table_no:number;kind:string;status:string;judge:string;created:number;responded_at:number|null;updated:number};
-type Tournament={event:EventSummary & {created:number;wait_highlight_minutes:number;branding:Branding};calls:Call[]};
+type Tournament={event:EventSummary & {created:number;ended:boolean;wait_highlight_minutes:number;branding:Branding};calls:Call[]};
 const defaults={buttonColor:'#c2df9f',backgroundColor:'#101713'};
 const eventLink=(id:string,view:string)=>'/?event='+encodeURIComponent(id)+'&view='+view;
 export const logoUrl=(id:string)=>'/api/data?logo='+encodeURIComponent(id);
@@ -110,6 +110,19 @@ function TournamentDetails({id,onLogoChange}:{id:string;onLogoChange:(logo:Heade
   }catch(error){setWaitNotice((error as Error).message)}
   finally{setBusy(false)}
  }
+ const [endNotice,setEndNotice]=useState('');
+ async function endTournament(){
+  if(!window.confirm('End this tournament? Table QR requests and judge access will close permanently. Call records will stay available here.'))return;
+  setBusy(true);
+  setEndNotice('');
+  try{
+   await request('/api/data',{action:'end',event:id});
+   const next=await request<Tournament>('/api/data?manage='+encodeURIComponent(id));
+   setData(next);
+   setEndNotice('Tournament ended. Call records are available below.');
+  }catch(error){setEndNotice((error as Error).message)}
+  finally{setBusy(false)}
+ }
  if(!data)return <p role="status">{notice||'Loading tournament…'}</p>;
  const {event,calls}=data;
  const logoPreview=logo===undefined?(event.branding.hasLogo?logoUrl(id)+'&v='+revision:''):logo;
@@ -117,18 +130,20 @@ function TournamentDetails({id,onLogoChange}:{id:string;onLogoChange:(logo:Heade
  return <>
   <section className="panel">
    <h2>{event.name}</h2>
-   <p>{event.tables} tables · {event.open?'Open':'Closed'} · Created {new Date(event.created).toLocaleDateString()}</p>
+   <p>{event.tables} tables · {event.ended?'Ended':event.open?'Open':'Closed'} · Created {new Date(event.created).toLocaleDateString()}</p>
 
    <div className="organizer-stats">
     <span><strong>{calls.length}</strong> Total calls</span>
     {['Waiting','On my way','Resolved'].map(status=><span key={status}><strong>{calls.filter(call=>call.status===status).length}</strong> {status}</span>)}
    </div>
-   <div className="actions">
+   {!event.ended&&<div className="actions">
     <a className="button" href={eventLink(id,'judge')}>Judge dashboard</a>
     <a className="button secondary" href={eventLink(id,'signs')}>Print table QR signs</a>
-   </div>
+    <button type="button" className="secondary" disabled={busy} onClick={endTournament}>End tournament</button>
+   </div>}
+   {endNotice&&<p role="status">{endNotice}</p>}
   </section>
-  <form className="panel" onSubmit={saveWaitThreshold}>
+  {!event.ended&&<><form className="panel" onSubmit={saveWaitThreshold}>
    <h2>Call queue settings</h2>
    <div className="branding-fields">
     <label>Highlight waiting calls after (minutes)
@@ -180,7 +195,7 @@ function TournamentDetails({id,onLogoChange}:{id:string;onLogoChange:(logo:Heade
     <button disabled={busy}>Save branding</button>
    </div>
    {notice&&<p role="status">{notice}</p>}
-  </form>
+  </form></>}
   <section className="panel">
    <h2>Call records</h2>
    {calls.length===0?<p>No calls yet.</p>:<>

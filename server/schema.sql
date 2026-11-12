@@ -25,3 +25,5 @@ UPDATE judging_calls SET responded_at=updated WHERE status='On my way' AND respo
 
 ALTER TABLE judging_events ADD COLUMN IF NOT EXISTS branding JSONB NOT NULL DEFAULT '{}';
 ALTER TABLE judging_events ADD COLUMN IF NOT EXISTS logo_data TEXT;
+
+ALTER TABLE judging_events ADD COLUMN IF NOT EXISTS ended_at BIGINT;

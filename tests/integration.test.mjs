@@ -115,6 +115,27 @@ test('shared timer, announcement, optimistic concurrency, QR and persistence',as
  const closed=await api('/api/data',{action:'toggle',event},key);assert.equal(closed.status,200);assert.equal((await api('/api/data',{action:'request',event,table:4,kind:'Rules question'})).status,409);
  const logout=await api('/api/logout',{});assert.equal(logout.status,200);assert.match(logout.headers.get('set-cookie'),/Max-Age=0/);
 });
+test('ending a tournament revokes player and judge access while preserving organizer records',async()=>{
+ const before=(await api('/api/data?manage='+event,null,'',cookie)).data.calls;
+ assert.ok(before.length>0);
+ assert.equal((await api('/api/data',{action:'end',event},key)).status,403);
+ assert.equal((await api('/api/data',{action:'end',event},'',cookie)).status,200);
+ assert.equal((await api('/api/data',{action:'end',event},'',cookie)).status,200);
+ for(const query of ['?event='+event,'?event='+event+'&staff=1','?receipt='+receipt]){
+  assert.equal((await api('/api/data'+query,null,key)).status,410);
+ }
+ for(const action of ['request','toggle','update','rotate','requeue']){
+  assert.equal((await api('/api/data',{action,event,id:receipt,status:'Resolved',table:1,kind:'Rules question'},key,cookie)).status,410);
+ }
+ assert.equal((await api('/api/screen',{event,operation:'message'},key)).status,410);
+ const after=await api('/api/data?manage='+event,null,'',cookie);
+ assert.equal(after.status,200);
+ assert.equal(after.data.event.ended,true);
+ assert.equal(after.data.event.open,0);
+ assert.deepEqual(after.data.calls,before);
+ const other=await api('/api/data',{action:'create',name:'Other tournament',tables:4},'',cookie);
+ assert.equal((await api('/api/data?event='+other.data.id)).data.open,1);
+});
 test('malformed JSON and cross-origin writes are rejected',async()=>{
  const r=await fetch(base+'/api/data',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://untrusted.example'},body:'{}'});assert.equal(r.status,403);
  const malformed=await fetch(base+'/api/data',{method:'POST',headers:{'Content-Type':'application/json'},body:'{broken'});assert.equal(malformed.status,400);
