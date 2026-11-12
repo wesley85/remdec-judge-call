@@ -1,6 +1,7 @@
 import {useEffect,useState} from 'react';
 import type {CSSProperties, FormEvent} from 'react';
 
+export type HeaderLogo={id:string;name:string;hasLogo:boolean;revision:number};
 export type Branding={buttonColor?:string; backgroundColor?:string; hasLogo?:boolean};
 type EventSummary={id:string;name:string;tables:number;open:number};
 type Call={id:string;table_no:number;kind:string;status:string;judge:string;created:number;responded_at:number|null;updated:number};
@@ -54,7 +55,7 @@ function duration(milliseconds:number){
  return Math.floor(seconds/60)+'m '+seconds%60+'s';
 }
 
-function TournamentDetails({id}:{id:string}){
+function TournamentDetails({id,onLogoChange}:{id:string;onLogoChange:(logo:HeaderLogo)=>void}){
  const [data,setData]=useState<Tournament|null>(null);
  const [colors,setColors]=useState(defaults);
  const [logo,setLogo]=useState<string|null|undefined>();
@@ -67,10 +68,11 @@ function TournamentDetails({id}:{id:string}){
   request<Tournament>('/api/data?manage='+encodeURIComponent(id)).then(result=>{
    if(!active)return;
    setData(result);
+   onLogoChange({id,name:result.event.name,hasLogo:!!result.event.branding.hasLogo,revision:0});
    setColors({...defaults,...result.event.branding});
   }).catch(error=>{if(active)setNotice(error.message)});
   return()=>{active=false};
- },[id]);
+ },[id,onLogoChange]);
 
  async function save(event:FormEvent){
   event.preventDefault();
@@ -81,7 +83,8 @@ function TournamentDetails({id}:{id:string}){
    const next=await request<Tournament>('/api/data?manage='+encodeURIComponent(id));
    setData(next);
    setLogo(undefined);
-   setRevision(value=>value+1);
+   setRevision(revision+1);
+   onLogoChange({id,name:next.event.name,hasLogo:!!next.event.branding.hasLogo,revision:revision+1});
    setNotice('Branding saved.');
   }catch(error){setNotice((error as Error).message)}
   finally{setBusy(false)}
@@ -150,7 +153,7 @@ function TournamentDetails({id}:{id:string}){
  </>;
 }
 
-export default function OrganizerDashboard({selectedId}:{selectedId:string}){
+export default function OrganizerDashboard({selectedId,onLogoChange}:{selectedId:string;onLogoChange:(logo:HeaderLogo)=>void}){
  const [events,setEvents]=useState<EventSummary[]|null>(null);
  const [name,setName]=useState('');
  const [tables,setTables]=useState('50');
@@ -186,7 +189,7 @@ export default function OrganizerDashboard({selectedId}:{selectedId:string}){
     <label>Your tournaments <select value={selected.id} onChange={e=>location.href=eventLink(e.target.value,'organizer')}>
      {events.map(event=><option value={event.id} key={event.id}>{event.name}</option>)}
     </select></label>
-    <TournamentDetails key={selected.id} id={selected.id}/>
+    <TournamentDetails key={selected.id} id={selected.id} onLogoChange={onLogoChange}/>
    </>}
   </>}
  </>;

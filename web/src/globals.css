@@ -27,3 +27,5 @@
 .organizer-table table{width:100%;border-collapse:collapse;text-align:left}
 .organizer-table th,.organizer-table td{padding:10px;border-bottom:1px solid #4f6b57;white-space:nowrap}
 @media print{.event-branding{background:white;min-height:0}.sign .print-event-logo{max-height:52px}}
+
+.header-event-logo{max-width:min(190px,35vw);max-height:54px;width:auto;height:auto}
