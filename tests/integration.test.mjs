@@ -83,12 +83,14 @@ test('organizer dashboard and print logo are scoped to the event',async()=>{
  assert.ok(owned.data.calls.some(call=>call.id===receipt&&call.status==='Resolved'));
  assert.equal(owned.data.event.key_hash,undefined);
  const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aQ3sAAAAASUVORK5CYII=';
- const colors={event,buttonColor:'#123456',backgroundColor:'#fafafa'};
+ const colors={event,buttonColor:'#123456',backgroundColor:'#fafafa',alertSound:'chime'};
  assert.equal((await api('/api/branding',colors,key)).status,403);
  assert.equal((await api('/api/branding',{...colors,buttonColor:'red'},'',cookie)).status,400);
  assert.equal((await api('/api/branding',{...colors,logo:'data:image/svg+xml;base64,AAAA'},'',cookie)).status,400);
  assert.equal((await api('/api/branding',{...colors,logo:'data:image/png;base64,'+png},'',cookie)).status,200);
- assert.deepEqual((await api('/api/data?event='+event)).data.branding,{buttonColor:'#123456',backgroundColor:'#fafafa',hasLogo:true});
+ assert.deepEqual((await api('/api/data?event='+event)).data.branding,{buttonColor:'#123456',backgroundColor:'#fafafa',alertSound:'chime',hasLogo:true});
+ assert.equal((await api('/api/data?event='+event+'&staff=1',null,key)).data.event.alertSound,'chime');
+ assert.equal((await api('/api/branding',{...colors,alertSound:'invalid'},'',cookie)).status,400);
  const logo=await fetch(base+'/api/data?logo='+event);
  assert.equal(logo.headers.get('content-type'),'image/png');
  assert.equal(Buffer.from(await logo.arrayBuffer()).toString('base64'),png);

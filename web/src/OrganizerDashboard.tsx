@@ -1,8 +1,10 @@
-import {useEffect,useState} from 'react';
+import {alertSounds,alertSoundOrDefault,playAlert} from './alert-sounds';
+import type {AlertSound} from './alert-sounds';
+import {useEffect,useRef,useState} from 'react';
 import type {CSSProperties, FormEvent} from 'react';
 
 export type HeaderLogo={id:string;name:string;hasLogo:boolean;revision:number};
-export type Branding={buttonColor?:string; backgroundColor?:string; hasLogo?:boolean};
+export type Branding={buttonColor?:string; backgroundColor?:string; hasLogo?:boolean; alertSound?:AlertSound};
 type EventSummary={id:string;name:string;tables:number;open:number};
 type Call={id:string;table_no:number;kind:string;status:string;judge:string;created:number;responded_at:number|null;updated:number};
 type Tournament={event:EventSummary & {created:number;wait_highlight_minutes:number;branding:Branding};calls:Call[]};
@@ -58,6 +60,9 @@ function duration(milliseconds:number){
 function TournamentDetails({id,onLogoChange}:{id:string;onLogoChange:(logo:HeaderLogo)=>void}){
  const [data,setData]=useState<Tournament|null>(null);
  const [colors,setColors]=useState(defaults);
+ const [sound,setSound]=useState<AlertSound>('default');
+ const previewAudio=useRef<AudioContext|null>(null);
+ useEffect(()=>()=>{void previewAudio.current?.close().catch(()=>{})},[]);
  const [logo,setLogo]=useState<string|null|undefined>();
  const [revision,setRevision]=useState(0);
  const [page,setPage]=useState(0);
@@ -70,6 +75,7 @@ function TournamentDetails({id,onLogoChange}:{id:string;onLogoChange:(logo:Heade
    setData(result);
    onLogoChange({id,name:result.event.name,hasLogo:!!result.event.branding.hasLogo,revision:0});
    setColors({...defaults,...result.event.branding});
+   setSound(alertSoundOrDefault(result.event.branding.alertSound));
   }).catch(error=>{if(active)setNotice(error.message)});
   return()=>{active=false};
  },[id,onLogoChange]);
@@ -79,7 +85,7 @@ function TournamentDetails({id,onLogoChange}:{id:string;onLogoChange:(logo:Heade
   setBusy(true);
   setNotice('');
   try{
-   await request('/api/branding',{event:id,...colors,logo});
+   await request('/api/branding',{event:id,...colors,logo,alertSound:sound});
    const next=await request<Tournament>('/api/data?manage='+encodeURIComponent(id));
    setData(next);
    setLogo(undefined);
@@ -112,6 +118,16 @@ function TournamentDetails({id,onLogoChange}:{id:string;onLogoChange:(logo:Heade
    <fieldset disabled={busy} className="branding-fields">
     <label>Button color <input type="color" value={colors.buttonColor} onChange={e=>setColors({...colors,buttonColor:e.target.value})}/></label>
     <label>Background color <input type="color" value={colors.backgroundColor} onChange={e=>setColors({...colors,backgroundColor:e.target.value})}/></label>
+    <label>Call alert sound <select value={sound} onChange={e=>setSound(alertSoundOrDefault(e.target.value))}>
+     {Object.entries(alertSounds).map(([value,preset])=><option value={value} key={value}>{preset.label}</option>)}
+    </select></label>
+    <button type="button" className="secondary" onClick={async()=>{
+     try{
+      previewAudio.current??=new AudioContext();
+      await previewAudio.current.resume();
+      playAlert(previewAudio.current,sound);
+     }catch{setNotice('Sound unavailable in this browser.')}
+    }}>Preview sound</button>
     <label>Event logo <input key={revision} type="file" accept="image/png,image/jpeg,image/webp" onChange={async e=>{
      const file=e.target.files?.[0];
      if(!file)return;

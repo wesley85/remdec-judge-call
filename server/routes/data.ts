@@ -32,7 +32,7 @@ export async function GET(req:Request){try{
   return json({event:{id:event.id,name:event.name,tables:event.tables,open:event.open,created:event.created,wait_highlight_minutes:event.wait_highlight_minutes,branding:brandingView(event)},calls:calls.results});
  }
  if(q.get('display'))return json({event:{id:event.id,name:event.name,tables:event.tables,open:event.open},timer:{round:event.round,remaining:event.timer_remaining,ends:event.timer_ends,state:event.timer_state,updated:event.timer_updated},announcement:event.announcement,bcpUrl:event.bcp_url,serverNow:Date.now(),calls:(await db.prepare("SELECT table_no,status,created FROM calls WHERE event=? AND status!='Resolved' ORDER BY created").bind(event.id).all()).results});
- if(q.get('staff')){if(await hash(req.headers.get('X-Judge-Key')||'')!==event.key_hash)return json({error:'Staff key is incorrect'},401);const organizer=await getChatGPTUser();return json({canManage:organizer?.userId===event.owner,event:{id:event.id,name:event.name,tables:event.tables,open:event.open,wait_highlight_minutes:event.wait_highlight_minutes,practice:event.owner==='test-practice-only'},calls:(await db.prepare("SELECT id,event,table_no,kind,status,judge,created,updated,responded_at,(claim_hash=?) AS claimed_by_me FROM calls WHERE event=? ORDER BY (status='Resolved') ASC, created DESC LIMIT 1000").bind(await claimIdentity(req),event.id).all()).results})}
+ if(q.get('staff')){if(await hash(req.headers.get('X-Judge-Key')||'')!==event.key_hash)return json({error:'Staff key is incorrect'},401);const organizer=await getChatGPTUser();return json({canManage:organizer?.userId===event.owner,event:{id:event.id,name:event.name,tables:event.tables,open:event.open,wait_highlight_minutes:event.wait_highlight_minutes,alertSound:event.branding?.alertSound,practice:event.owner==='test-practice-only'},calls:(await db.prepare("SELECT id,event,table_no,kind,status,judge,created,updated,responded_at,(claim_hash=?) AS claimed_by_me FROM calls WHERE event=? ORDER BY (status='Resolved') ASC, created DESC LIMIT 1000").bind(await claimIdentity(req),event.id).all()).results})}
  return json({id:event.id,name:event.name,tables:event.tables,open:event.open,practice:event.owner==='test-practice-only',branding:brandingView(event)});
  }catch{return json({error:'Could not load data. Please retry.'},500)}}
 export async function POST(req:Request){try{
@@ -49,8 +49,9 @@ export async function POST(req:Request){try{
   if(owner?.userId!==event.owner)return json({error:'Sign in as the event organizer.'},403);
   if(typeof d.buttonColor!=='string'||typeof d.backgroundColor!=='string'||!colorPattern.test(d.buttonColor)||!colorPattern.test(d.backgroundColor))return json({error:'Choose valid colors.'},400);
   if(d.logo!==undefined&&d.logo!==null&&!validLogo(d.logo))return json({error:'Upload a valid logo image.'},400);
-  const branding=JSON.stringify({buttonColor:d.buttonColor,backgroundColor:d.backgroundColor});
-  await db.prepare('UPDATE events SET branding=?,logo_data=CASE WHEN ? THEN ? ELSE logo_data END WHERE id=?')
+  if(d.alertSound!==undefined&&!['default','chime','double','low'].includes(d.alertSound))return json({error:'Choose a valid alert sound.'},400);
+  const branding=JSON.stringify({buttonColor:d.buttonColor,backgroundColor:d.backgroundColor,alertSound:d.alertSound});
+  await db.prepare('UPDATE events SET branding=branding || ?::jsonb,logo_data=CASE WHEN ? THEN ? ELSE logo_data END WHERE id=?')
    .bind(branding,d.logo!==undefined,d.logo??null,event.id).run();
   return json({ok:true});
  }
